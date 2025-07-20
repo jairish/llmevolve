@@ -1,76 +1,88 @@
 import tensorflow as tf
+from tensorflow.keras.layers import TextVectorization
 from model import create_model, VOCAB_SIZE, MAX_SEQUENCE_LENGTH # Import constants
 import json
 import os
 import numpy as np
+import re
+
+# Special tokens
+PAD_TOKEN = '<PAD>'
+UNK_TOKEN = '<UNK>'
+SOS_TOKEN = '<SOS>' # Start of Sequence
+EOS_TOKEN = '<EOS>' # End of Sequence
 
 def prepare_data():
-    """Generates a simple synthetic character-level dataset."""
-    # Simple conversational pairs
+    """Generates a simple synthetic word-level dataset and tokenizes it.
+    This demonstrates how TextVectorization handles data preparation for training.
+    For a truly large dataset, you would load data from files here.
+    """
+    # A slightly expanded set of conversational pairs for demonstration.
+    # In a real scenario, this would be loaded from a large file.
     qa_pairs = [
-        ("hi", "hello"),
-        ("how are you", "i am fine"),
-        ("what is your name", "i am a bot"),
-        ("bye", "goodbye"),
-        ("tell me a joke", "why did the scarecrow win an award because he was outstanding in his field"),
-        ("what time is it", "it's time to learn"),
-        ("how old are you", "i am ageless"),
-        ("where are you from", "i live in the cloud"),
-        ("who created you", "i was created by google"),
-        ("thank you", "you're welcome")
+        ("hi there", "hello how are you"),
+        ("how are you doing", "i am doing fine thank you"),
+        ("what is your name", "my name is chatbot"),
+        ("goodbye for now", "see you later goodbye"),
+        ("tell me a funny joke", "why don't scientists trust atoms because they make up everything"),
+        ("what time is it", "it's always time to learn"),
+        ("how old are you", "i am a timeless AI"),
+        ("where are you from", "i exist in the digital realm"),
+        ("who created you", "i was created by a large language model"),
+        ("thank you very much", "you are most welcome"),
+        ("what is the weather like", "i cannot tell you the weather"),
+        ("can you help me", "i will try my best to assist you"),
+        ("what do you like to do", "i enjoy processing information"),
+        ("do you have feelings", "as an AI I do not have feelings"),
+        ("what is the meaning of life", "the meaning of life is a profound question")
     ]
 
-    all_chars = sorted(list(set("".join([q + a for q, a in qa_pairs]))))
-    char_to_int = {char: i for i, char in enumerate(all_chars)}
-    int_to_char = {i: char for i, char in enumerate(all_chars)}
-    
-    # Add padding and OOV (Out-Of-Vocabulary) tokens if necessary
-    # For simplicity, we'll assume all chars are in vocab and pad with 0
-    if '' not in char_to_int:
-        char_to_int['<PAD>'] = 0
-        int_to_char[0] = '<PAD>'
-        all_chars.insert(0, '<PAD>')
-    
-    # Update VOCAB_SIZE to match actual characters + padding
-    # This is a critical point for consistency between model.py and train.py
-    # In a real scenario, VOCAB_SIZE would be passed or derived from a shared tokenizer
-    # For this self-upgrading demo, we'll ensure it's consistent.
-    # The model.py will use a hardcoded VOCAB_SIZE, so we need to ensure our data fits.
-    # For now, let's ensure our data's vocab size is <= model's VOCAB_SIZE
-    # And if model.py's VOCAB_SIZE is larger, it just means some embeddings are unused.
+    input_texts = [pair[0] for pair in qa_pairs]
+    target_texts = [pair[1] for pair in qa_pairs]
 
-    # Ensure MAX_SEQUENCE_LENGTH is sufficient
-    # MAX_SEQUENCE_LENGTH is also hardcoded in model.py
-    # We need to ensure our padding aligns with it.
+    # Add SOS and EOS tokens to target sequences for the decoder
+    decoder_input_texts = [SOS_TOKEN + ' ' + text for text in target_texts]
+    decoder_target_texts = [text + ' ' + EOS_TOKEN for text in target_texts]
 
-    encoder_input_data = np.zeros((len(qa_pairs), MAX_SEQUENCE_LENGTH), dtype='int32')
-    decoder_input_data = np.zeros((len(qa_pairs), MAX_SEQUENCE_LENGTH), dtype='int32')
-    decoder_target_data = np.zeros((len(qa_pairs), MAX_SEQUENCE_LENGTH), dtype='int32')
+    # Initialize TextVectorization layer
+    # This layer handles lowercasing, punctuation stripping, splitting,
+    # and converting text to integer sequences based on a learned vocabulary.
+    text_vectorizer = TextVectorization(
+        max_tokens=VOCAB_SIZE, # Max vocabulary size, from model.py
+        output_mode='int',
+        output_sequence_length=MAX_SEQUENCE_LENGTH, # Max sequence length, from model.py
+        standardize="lower_and_strip_punctuation",
+        split="whitespace",
+        # Ensure special tokens are at the start of the vocabulary
+        vocabulary=[PAD_TOKEN, UNK_TOKEN, SOS_TOKEN, EOS_TOKEN] 
+    )
 
-    for i, (input_text, target_text) in enumerate(qa_pairs):
-        # Encoder input
-        for t, char in enumerate(input_text):
-            if t < MAX_SEQUENCE_LENGTH:
-                encoder_input_data[i, t] = char_to_int.get(char, 0) # Use 0 for unknown/padding
+    # Adapt the vectorizer to the combined input and target texts.
+    # This builds the vocabulary based on the provided data.
+    all_sentences = input_texts + target_texts + decoder_input_texts + decoder_target_texts
+    text_vectorizer.adapt(all_sentences)
 
-        # Decoder input (shifted by one, includes start token if applicable, but here just shifted target)
-        # For character-level, we just shift the target.
-        # Start token is implicitly handled by the first char of target_text
-        for t, char in enumerate(target_text):
-            if t < MAX_SEQUENCE_LENGTH:
-                decoder_input_data[i, t] = char_to_int.get(char, 0)
+    # Get the vocabulary and create inverse mapping for debugging/inference
+    vocab = text_vectorizer.get_vocabulary()
+    int_to_word = {idx: word for idx, word in enumerate(vocab)}
+    word_to_int = {word: idx for idx, word in enumerate(vocab)}
 
-        # Decoder target (one-hot encoded for each time step)
-        for t, char in enumerate(target_text):
-            if t < MAX_SEQUENCE_LENGTH:
-                decoder_target_data[i, t] = char_to_int.get(char, 0) # No +1 for next char, it's the char itself
+    # Critical check: Ensure model.py's VOCAB_SIZE is large enough for the actual data's vocabulary
+    if len(vocab) > VOCAB_SIZE:
+        print(f"WARNING: Actual vocabulary size ({len(vocab)}) exceeds VOCAB_SIZE in model.py ({VOCAB_SIZE}). "
+              "Please increase VOCAB_SIZE in model.py to avoid data loss.")
 
-    return (encoder_input_data, decoder_input_data, decoder_target_data), char_to_int, int_to_char
+    # Convert texts to sequences of integers using the adapted vectorizer
+    encoder_input_data = text_vectorizer(input_texts).numpy()
+    decoder_input_data = text_vectorizer(decoder_input_texts).numpy()
+    decoder_target_data = text_vectorizer(decoder_target_texts).numpy()
+
+    return (encoder_input_data, decoder_input_data, decoder_target_data), word_to_int, int_to_word
 
 def train_and_evaluate():
     """Loads data, trains the model, and prints the evaluation result as JSON."""
-    # 1. Prepare Data
-    (encoder_input_data, decoder_input_data, decoder_target_data), char_to_int, int_to_char = prepare_data()
+    # 1. Prepare Data using the enhanced prepare_data function
+    (encoder_input_data, decoder_input_data, decoder_target_data), word_to_int, int_to_word = prepare_data()
 
     # Split data (simple split for demonstration)
     num_samples = encoder_input_data.shape[0]
@@ -88,13 +100,12 @@ def train_and_evaluate():
     model = create_model()
     
     print(f"Training model with {len(train_encoder_input)} samples...")
-    # Use a small subset for faster cycles for actual training
-    # For a real chat model, you'd need a much larger dataset and more epochs
+    # Increased epochs and batch size slightly for better demonstration with word-level data
     history = model.fit(
         [train_encoder_input, train_decoder_input],
         train_decoder_target,
-        epochs=10, # Increased epochs for text
-        batch_size=2, # Small batch size for small dataset
+        epochs=20, # Increased epochs for text
+        batch_size=4, # Small batch size for small dataset
         validation_split=0.2,
         verbose=0 # Keep verbose 0 for subprocess
     )
