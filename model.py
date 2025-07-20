@@ -1,5 +1,5 @@
 import tensorflow as tf
-from tensorflow.keras.layers import Embedding, LSTM, Dense, TimeDistributed, Input, Dropout
+from tensorflow.keras.layers import Embedding, LSTM, Dense, TimeDistributed, Input
 from tensorflow.keras.models import Model
 
 # These constants must match what's used in train.py
@@ -13,20 +13,15 @@ def create_model():
     # Encoder
     encoder_inputs = Input(shape=(MAX_SEQUENCE_LENGTH,))
     encoder_embedding = Embedding(VOCAB_SIZE, EMBEDDING_DIM)(encoder_inputs)
-    encoder_embedding = Dropout(0.4)(encoder_embedding)
-    encoder_lstm1 = LSTM(LSTM_UNITS, return_sequences=True, return_state=True)
-    encoder_outputs1, state_h1, state_c1 = encoder_lstm1(encoder_embedding)
-    encoder_lstm2 = LSTM(LSTM_UNITS, return_state=True)
-    encoder_outputs, state_h, state_c = encoder_lstm2(encoder_outputs1)
+    encoder_lstm = LSTM(LSTM_UNITS, return_state=True)
+    encoder_outputs, state_h, state_c = encoder_lstm(encoder_embedding)
     encoder_states = [state_h, state_c]
 
     # Decoder
     decoder_inputs = Input(shape=(MAX_SEQUENCE_LENGTH,))
     decoder_embedding = Embedding(VOCAB_SIZE, EMBEDDING_DIM)(decoder_inputs)
-    decoder_embedding = Dropout(0.4)(decoder_embedding)
-    decoder_lstm = LSTM(LSTM_UNITS*2, return_sequences=True, return_state=True) # Increased LSTM units in decoder
+    decoder_lstm = LSTM(LSTM_UNITS, return_sequences=True, return_state=True)
     decoder_outputs, _, _ = decoder_lstm(decoder_embedding, initial_state=encoder_states)
-    decoder_outputs = Dropout(0.4)(decoder_outputs)
     decoder_dense = TimeDistributed(Dense(VOCAB_SIZE, activation='softmax'))
     output = decoder_dense(decoder_outputs)
 
