@@ -23,14 +23,14 @@ def prepare_data():
     all_chars = sorted(list(set("".join([q + a for q, a in qa_pairs]))))
     char_to_int = {char: i for i, char in enumerate(all_chars)}
     int_to_char = {i: char for i, char in enumerate(all_chars)}
-    
+
     # Add padding and OOV (Out-Of-Vocabulary) tokens if necessary
     # For simplicity, we'll assume all chars are in vocab and pad with 0
     if '' not in char_to_int:
         char_to_int['<PAD>'] = 0
         int_to_char[0] = '<PAD>'
         all_chars.insert(0, '<PAD>')
-    
+
     # Update VOCAB_SIZE to match actual characters + padding
     # This is a critical point for consistency between model.py and train.py
     # In a real scenario, VOCAB_SIZE would be passed or derived from a shared tokenizer
@@ -86,7 +86,7 @@ def train_and_evaluate():
 
     # 2. Create and Train Model
     model = create_model()
-    
+
     print(f"Training model with {len(train_encoder_input)} samples...")
     # Use a small subset for faster cycles for actual training
     # For a real chat model, you'd need a much larger dataset and more epochs
@@ -98,7 +98,7 @@ def train_and_evaluate():
         validation_split=0.2,
         verbose=0 # Keep verbose 0 for subprocess
     )
-    
+
     # Get the last validation loss from history
     val_loss = history.history['val_loss'][-1] if 'val_loss' in history.history else history.history['loss'][-1]
     val_accuracy = history.history['val_accuracy'][-1] if 'val_accuracy' in history.history else history.history['accuracy'][-1]
@@ -110,11 +110,11 @@ def train_and_evaluate():
         test_decoder_target,
         verbose=0
     )
-    
+
     # 4. Save the current model temporarily
     model_save_path = 'temp_model.keras'
     model.save(model_save_path)
-    
+
     # 5. Output results as a JSON string for the orchestrator to capture
     # We prioritize loss for self-improvement in chat models
     result = {'loss': loss, 'accuracy': accuracy, 'temp_model_path': model_save_path}
