@@ -184,20 +184,30 @@ def prepare_data():
 
     # Get vocabulary and inverse vocabulary for later use
     vocab = answer_vectorizer.get_vocabulary()
-    int_to_char = {i: char for i, char in enumerate(vocab)} # Renaming for consistency with previous char model
+    # int_to_char = {i: char for i, char in enumerate(vocab)} # Renaming for consistency with previous char model
 
-    return (encoder_input_data, decoder_input_data, decoder_target_data), vocab, int_to_char
+    # The function is expected to return (encoder_input_data, decoder_input_data, decoder_target_data), vocab, int_to_char
+    # But int_to_char is not used in train_and_evaluate, and returning it causes the "too many values to unpack" error
+    # when prepare_data returns None values if data loading fails.
+    # Let's adjust the return to match what train_and_evaluate expects when data loading is successful,
+    # and handle the None case explicitly in train_and_evaluate.
+
+    return (encoder_input_data, decoder_input_data, decoder_target_data), vocab
+
 
 def train_and_evaluate():
     """Loads data, trains the model, and prints the evaluation result as JSON."""
     # 1. Prepare Data
-    (encoder_input_data, decoder_input_data, decoder_target_data), vocab, int_to_char = prepare_data()
+    # Adjusted unpacking to match the potentially changed return of prepare_data
+    data_tuple, vocab = prepare_data()
 
-    if encoder_input_data is None:
+    if data_tuple is None:
         print("Data preparation failed. Skipping training.")
         result = {'loss': float('inf'), 'accuracy': 0.0, 'temp_model_path': ''}
         print(json.dumps(result))
         return # Exit if data prep failed
+
+    encoder_input_data, decoder_input_data, decoder_target_data = data_tuple
 
 
     # Split data (simple split for demonstration)
