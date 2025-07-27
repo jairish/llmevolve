@@ -7,6 +7,7 @@ import numpy as np
 import re
 import io
 import requests # Added for downloading the dataset
+import subprocess # Added for subprocess calls
 
 # Special tokens
 PAD_TOKEN = '<PAD>'
