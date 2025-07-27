@@ -1,79 +1,175 @@
 import tensorflow as tf
+from tensorflow.keras.layers import TextVectorization
 from model import create_model, VOCAB_SIZE, MAX_SEQUENCE_LENGTH # Import constants
 import json
 import os
 import numpy as np
+import re
+import io
+import requests # Added for downloading the dataset
+
+# Special tokens
+PAD_TOKEN = '<PAD>'
+UNK_TOKEN = '<UNK>'
+SOS_TOKEN = '<SOS>' # Start of Sequence
+EOS_TOKEN = '' # End of Sequence
+
+def download_cornell_dialogs():
+    """Downloads and extracts the Cornell Movie-Dialogs Corpus."""
+    url = "http://www.cs.cornell.edu/~cristian/data/cornell_movie_dialogs_corpus.zip"
+    zip_path = "cornell_movie_dialogs_corpus.zip"
+    extract_path = "cornell_movie_dialogs_corpus"
+
+    if not os.path.exists(extract_path):
+        print(f"Downloading {url}...")
+        try:
+            r = requests.get(url, stream=True)
+            r.raise_for_status() # Raise an exception for bad status codes
+            with open(zip_path, 'wb') as f:
+                for chunk in r.iter_content(chunk_size=8192):
+                    f.write(chunk)
+            print(f"Downloaded {zip_path}.")
+
+            print(f"Extracting {zip_path}...")
+            subprocess.run(['unzip', '-o', zip_path, '-d', extract_path], check=True)
+            print(f"Extracted to {extract_path}.")
+        except requests.exceptions.RequestException as e:
+            print(f"Error downloading dataset: {e}")
+            return None
+        except subprocess.CalledProcessError as e:
+             print(f"Error extracting dataset: {e}")
+             return None
+        finally:
+            if os.path.exists(zip_path):
+                os.remove(zip_path) # Clean up the zip file
+
+    return extract_path
+
+def load_cornell_dialogs(corpus_path):
+    """Loads conversational pairs from the Cornell Movie-Dialogs Corpus."""
+    lines_filepath = os.path.join(corpus_path, 'movie_lines.txt')
+    conv_filepath = os.path.join(corpus_path, 'movie_conversations.txt')
+
+    # Load lines
+    id2line = {}
+    with open(lines_filepath, errors='ignore') as f:
+        for line in f:
+            parts = line.strip().split(' +++$+++ ')
+            if len(parts) == 5:
+                id2line[parts[0]] = parts[4]
+
+    # Load conversations and extract pairs
+    qa_pairs = []
+    with open(conv_filepath, errors='ignore') as f:
+        for line in f:
+            parts = line.strip().split(' +++$+++ ')
+            if len(parts) == 4:
+                line_ids = parts[3][1:-1].replace("'", "").split(", ")
+                for i in range(len(line_ids) - 1):
+                    # Get question and answer lines
+                    question = id2line.get(line_ids[i], '')
+                    answer = id2line.get(line_ids[i+1], '')
+
+                    # Simple cleaning
+                    question = re.sub(r'[^a-zA-Z0-9\s]', '', question).strip().lower()
+                    answer = re.sub(r'[^a-zA-Z0-9\s]', '', answer).strip().lower()
+
+                    if question and answer: # Only keep non-empty pairs
+                        qa_pairs.append((question, answer))
+
+    return qa_pairs
 
 def prepare_data():
-    """Generates a simple synthetic character-level dataset."""
-    # Simple conversational pairs
-    qa_pairs = [
-        ("hi", "hello"),
-        ("how are you", "i am fine"),
-        ("what is your name", "i am a bot"),
-        ("bye", "goodbye"),
-        ("tell me a joke", "why did the scarecrow win an award because he was outstanding in his field"),
-        ("what time is it", "it's time to learn"),
-        ("how old are you", "i am ageless"),
-        ("where are you from", "i live in the cloud"),
-        ("who created you", "i was created by google"),
-        ("thank you", "you're welcome")
-    ]
+    """Downloads, loads, and preprocesses the Cornell dataset."""
+    corpus_path = download_cornell_dialogs()
+    if not corpus_path:
+        return None, None, None, None # Return None if download/extraction failed
 
-    all_chars = sorted(list(set("".join([q + a for q, a in qa_pairs]))))
-    char_to_int = {char: i for i, char in enumerate(all_chars)}
-    int_to_char = {i: char for i, char in enumerate(all_chars)}
+    qa_pairs = load_cornell_dialogs(corpus_path)
 
-    # Add padding and OOV (Out-Of-Vocabulary) tokens if necessary
-    # For simplicity, we'll assume all chars are in vocab and pad with 0
-    if '' not in char_to_int:
-        char_to_int['<PAD>'] = 0
-        int_to_char[0] = '<PAD>'
-        all_chars.insert(0, '<PAD>')
+    if not qa_pairs:
+        print("No conversational pairs loaded from the dataset.")
+        return None, None, None, None
 
-    # Update VOCAB_SIZE to match actual characters + padding
-    # This is a critical point for consistency between model.py and train.py
-    # In a real scenario, VOCAB_SIZE would be passed or derived from a shared tokenizer
-    # For this self-upgrading demo, we'll ensure it's consistent.
-    # The model.py will use a hardcoded VOCAB_SIZE, so we need to ensure our data fits.
-    # For now, let's ensure our data's vocab size is <= model's VOCAB_SIZE
-    # And if model.py's VOCAB_SIZE is larger, it just means some embeddings are unused.
+    print(f"Loaded {len(qa_pairs)} conversational pairs.")
 
-    # Ensure MAX_SEQUENCE_LENGTH is sufficient
-    # MAX_SEQUENCE_LENGTH is also hardcoded in model.py
-    # We need to ensure our padding aligns with it.
+    # Use a subset for faster iteration during development
+    # In a real scenario, you'd use the full dataset or a large subset.
+    # For demonstrating the flow, we'll use a small fraction.
+    subset_size = min(10000, len(qa_pairs)) # Use up to 10000 pairs or the total number if smaller
+    qa_pairs_subset = qa_pairs[:subset_size]
+    print(f"Using a subset of {len(qa_pairs_subset)} pairs.")
 
-    encoder_input_data = np.zeros((len(qa_pairs), MAX_SEQUENCE_LENGTH), dtype='int32')
-    decoder_input_data = np.zeros((len(qa_pairs), MAX_SEQUENCE_LENGTH), dtype='int32')
-    decoder_target_data = np.zeros((len(qa_pairs), MAX_SEQUENCE_LENGTH), dtype='int32')
+    questions = [q for q, a in qa_pairs_subset]
+    answers = [a for q, a in qa_pairs_subset]
 
-    for i, (input_text, target_text) in enumerate(qa_pairs):
-        # Encoder input
-        for t, char in enumerate(input_text):
-            if t < MAX_SEQUENCE_LENGTH:
-                encoder_input_data[i, t] = char_to_int.get(char, 0) # Use 0 for unknown/padding
+    # Add SOS and EOS tokens to answers for sequence generation
+    answers_input = [SOS_TOKEN + ' ' + a for a in answers]
+    answers_target = [a + ' ' + EOS_TOKEN for a in answers]
 
-        # Decoder input (shifted by one, includes start token if applicable, but here just shifted target)
-        # For character-level, we just shift the target.
-        # Start token is implicitly handled by the first char of target_text
-        for t, char in enumerate(target_text):
-            if t < MAX_SEQUENCE_LENGTH:
-                decoder_input_data[i, t] = char_to_int.get(char, 0)
+    # Text Vectorization
+    # The TextVectorization layer handles tokenization, lowercasing, and vocabulary creation.
+    # It also pads/truncates sequences to MAX_SEQUENCE_LENGTH.
 
-        # Decoder target (one-hot encoded for each time step)
-        for t, char in enumerate(target_text):
-            if t < MAX_SEQUENCE_LENGTH:
-                decoder_target_data[i, t] = char_to_int.get(char, 0) # No +1 for next char, it's the char itself
+    # Create vectorizer for questions
+    question_vectorizer = TextVectorization(
+        max_tokens=VOCAB_SIZE,
+        output_sequence_length=MAX_SEQUENCE_LENGTH,
+        standardize='lower_and_strip_punctuation',
+        split='whitespace',
+        # We don't need to explicitly add PAD or UNK here, TextVectorization handles them.
+        # index=0 is reserved for padding by default.
+    )
+    question_vectorizer.adapt(questions)
 
-    return (encoder_input_data, decoder_input_data, decoder_target_data), char_to_int, int_to_char
+    # Create vectorizer for answers
+    answer_vectorizer = TextVectorization(
+        max_tokens=VOCAB_SIZE, # Use the same vocabulary size
+        output_sequence_length=MAX_SEQUENCE_LENGTH,
+        standardize='lower_and_strip_punctuation',
+        split='whitespace',
+        vocabulary=[PAD_TOKEN, UNK_TOKEN, SOS_TOKEN, EOS_TOKEN] + sorted(list(set(" ".join(answers_input + answers_target).split())))[:VOCAB_SIZE-4]
+    )
+    answer_vectorizer.adapt(answers_input + answers_target)
+
+
+    # Convert text data to sequences of integers
+    encoder_input_data = question_vectorizer(questions).numpy()
+    decoder_input_data = answer_vectorizer(answers_input).numpy()
+    decoder_target_data = answer_vectorizer(answers_target).numpy()
+
+    # Ensure shapes are consistent (should be handled by TextVectorization)
+    # print("Encoder input shape:", encoder_input_data.shape)
+    # print("Decoder input shape:", decoder_input_data.shape)
+    # print("Decoder target shape:", decoder_target_data.shape)
+
+    # Get vocabulary and inverse vocabulary for later use
+    vocab = answer_vectorizer.get_vocabulary()
+    int_to_char = {i: char for i, char in enumerate(vocab)} # Renaming for consistency with previous char model
+
+    return (encoder_input_data, decoder_input_data, decoder_target_data), vocab, int_to_char
 
 def train_and_evaluate():
     """Loads data, trains the model, and prints the evaluation result as JSON."""
     # 1. Prepare Data
-    (encoder_input_data, decoder_input_data, decoder_target_data), char_to_int, int_to_char = prepare_data()
+    (encoder_input_data, decoder_input_data, decoder_target_data), vocab, int_to_char = prepare_data()
+
+    if encoder_input_data is None:
+        print("Data preparation failed. Skipping training.")
+        result = {'loss': float('inf'), 'accuracy': 0.0, 'temp_model_path': ''}
+        print(json.dumps(result))
+        return # Exit if data prep failed
+
 
     # Split data (simple split for demonstration)
     num_samples = encoder_input_data.shape[0]
+    if num_samples < 10: # Need at least some samples for split
+        print(f"Not enough data ({num_samples} samples) to perform train/test split. Skipping training.")
+        result = {'loss': float('inf'), 'accuracy': 0.0, 'temp_model_path': ''}
+        print(json.dumps(result))
+        return
+
+
     train_split = int(num_samples * 0.8)
 
     train_encoder_input = encoder_input_data[:train_split]
@@ -84,17 +180,20 @@ def train_and_evaluate():
     test_decoder_input = decoder_input_data[train_split:]
     test_decoder_target = decoder_target_data[train_split:]
 
+    print(f"Train samples: {len(train_encoder_input)}, Test samples: {len(test_encoder_input)}")
+
+
     # 2. Create and Train Model
     model = create_model()
 
-    print(f"Training model with {len(train_encoder_input)} samples...")
+    print(f"Training model...")
     # Use a small subset for faster cycles for actual training
     # For a real chat model, you'd need a much larger dataset and more epochs
     history = model.fit(
         [train_encoder_input, train_decoder_input],
         train_decoder_target,
-        epochs=10, # Increased epochs for text
-        batch_size=2, # Small batch size for small dataset
+        epochs=5, # Reduced epochs for faster cycles
+        batch_size=64, # Increased batch size for larger data
         validation_split=0.2,
         verbose=0 # Keep verbose 0 for subprocess
     )
@@ -104,7 +203,7 @@ def train_and_evaluate():
     val_accuracy = history.history['val_accuracy'][-1] if 'val_accuracy' in history.history else history.history['accuracy'][-1]
 
     # 3. Evaluate on test set
-    print(f"Evaluating model with {len(test_encoder_input)} samples...")
+    print(f"Evaluating model...")
     loss, accuracy = model.evaluate(
         [test_encoder_input, test_decoder_input],
         test_decoder_target,
