@@ -20,6 +20,7 @@ def download_cornell_dialogs():
     url = "http://www.cs.cornell.edu/~cristian/data/cornell_movie_dialogs_corpus.zip"
     zip_path = "cornell_movie_dialogs_corpus.zip"
     extract_path = "cornell_movie_dialogs_corpus"
+    lines_filepath = os.path.join(extract_path, 'movie_lines.txt') # Define expected file path
 
     if not os.path.exists(extract_path):
         print(f"Downloading {url}...")
@@ -29,20 +30,45 @@ def download_cornell_dialogs():
             with open(zip_path, 'wb') as f:
                 for chunk in r.iter_content(chunk_size=8192):
                     f.write(chunk)
-            print(f"Downloaded {zip_path}.")
+            print(f"Downloaded {zip_path} successfully.")
 
             print(f"Extracting {zip_path}...")
-            subprocess.run(['unzip', '-o', zip_path, '-d', extract_path], check=True)
-            print(f"Extracted to {extract_path}.")
+            # Use -o to overwrite without prompting, -d to specify directory
+            subprocess.run(['unzip', '-o', zip_path, '-d', extract_path], check=True, capture_output=True, text=True)
+            print(f"Extraction complete to {extract_path}.")
+
+            # Verify if the expected file exists after extraction
+            if not os.path.exists(lines_filepath):
+                print(f"ERROR: Expected file '{lines_filepath}' not found after extraction.")
+                # You might want to inspect the contents of extract_path here if it exists
+                if os.path.exists(extract_path):
+                     print(f"Contents of {extract_path}: {os.listdir(extract_path)}")
+                return None # Indicate failure
+            else:
+                print(f"Verification successful: '{lines_filepath}' found.")
+
         except requests.exceptions.RequestException as e:
             print(f"Error downloading dataset: {e}")
             return None
         except subprocess.CalledProcessError as e:
              print(f"Error extracting dataset: {e}")
+             print(f"Extraction Stderr: {e.stderr}")
              return None
         finally:
             if os.path.exists(zip_path):
                 os.remove(zip_path) # Clean up the zip file
+                print(f"Cleaned up zip file: {zip_path}")
+    else:
+        print(f"Extraction directory '{extract_path}' already exists. Skipping download/extraction.")
+        # Verify if the expected file exists even if directory exists (e.g., partial previous run)
+        if not os.path.exists(lines_filepath):
+             print(f"Warning: Extraction directory exists but expected file '{lines_filepath}' not found.")
+             # Consider re-downloading/extracting or reporting error depending on desired behavior
+             # For now, just warn and return None
+             return None
+        else:
+             print(f"Verification successful: '{lines_filepath}' found in existing directory.")
+
 
     return extract_path
 
@@ -50,6 +76,16 @@ def load_cornell_dialogs(corpus_path):
     """Loads conversational pairs from the Cornell Movie-Dialogs Corpus."""
     lines_filepath = os.path.join(corpus_path, 'movie_lines.txt')
     conv_filepath = os.path.join(corpus_path, 'movie_conversations.txt')
+
+    # Check if files exist before trying to open
+    if not os.path.exists(lines_filepath):
+        print(f"ERROR: Lines file not found at {lines_filepath}")
+        return None
+
+    if not os.path.exists(conv_filepath):
+        print(f"ERROR: Conversations file not found at {conv_filepath}")
+        return None
+
 
     # Load lines
     id2line = {}
@@ -84,11 +120,12 @@ def prepare_data():
     """Downloads, loads, and preprocesses the Cornell dataset."""
     corpus_path = download_cornell_dialogs()
     if not corpus_path:
+        print("Download or extraction failed.")
         return None, None, None, None # Return None if download/extraction failed
 
     qa_pairs = load_cornell_dialogs(corpus_path)
 
-    if not qa_pairs:
+    if qa_pairs is None or not qa_pairs: # Check if load failed or no pairs found
         print("No conversational pairs loaded from the dataset.")
         return None, None, None, None
 
@@ -124,6 +161,7 @@ def prepare_data():
     question_vectorizer.adapt(questions)
 
     # Create vectorizer for answers
+    # Include special tokens in the vocabulary explicitly
     answer_vectorizer = TextVectorization(
         max_tokens=VOCAB_SIZE, # Use the same vocabulary size
         output_sequence_length=MAX_SEQUENCE_LENGTH,
@@ -176,6 +214,14 @@ def train_and_evaluate():
     train_encoder_input = encoder_input_data[:train_split]
     train_decoder_input = decoder_input_data[:train_split]
     train_decoder_target = decoder_target_data[:train_split]
+
+    test_split = num_samples - train_split
+    if test_split < 1:
+         print(f"Not enough data ({num_samples} samples) to create a test set. Skipping training.")
+         result = {'loss': float('inf'), 'accuracy': 0.0, 'temp_model_path': ''}
+         print(json.dumps(result))
+         return
+
 
     test_encoder_input = encoder_input_data[train_split:]
     test_decoder_input = decoder_input_data[train_split:]
