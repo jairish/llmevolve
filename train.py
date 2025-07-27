@@ -121,12 +121,14 @@ def prepare_data():
     corpus_path = download_cornell_dialogs()
     if not corpus_path:
         print("Download or extraction failed.")
-        return None, None, None, None # Return None if download/extraction failed
+        # Return None for all expected outputs if data prep fails
+        return None, None, None, None
 
     qa_pairs = load_cornell_dialogs(corpus_path)
 
     if qa_pairs is None or not qa_pairs: # Check if load failed or no pairs found
         print("No conversational pairs loaded from the dataset.")
+        # Return None for all expected outputs if data load fails
         return None, None, None, None
 
     print(f"Loaded {len(qa_pairs)} conversational pairs.")
@@ -184,22 +186,16 @@ def prepare_data():
 
     # Get vocabulary and inverse vocabulary for later use
     vocab = answer_vectorizer.get_vocabulary()
-    # int_to_char = {i: char for i, char in enumerate(vocab)} # Renaming for consistency with previous char model
+    int_to_char = {i: char for i, char in enumerate(vocab)} # Renaming for consistency with previous char model
 
-    # The function is expected to return (encoder_input_data, decoder_input_data, decoder_target_data), vocab, int_to_char
-    # But int_to_char is not used in train_and_evaluate, and returning it causes the "too many values to unpack" error
-    # when prepare_data returns None values if data loading fails.
-    # Let's adjust the return to match what train_and_evaluate expects when data loading is successful,
-    # and handle the None case explicitly in train_and_evaluate.
-
-    return (encoder_input_data, decoder_input_data, decoder_target_data), vocab
+    return (encoder_input_data, decoder_input_data, decoder_target_data), vocab, int_to_char
 
 
 def train_and_evaluate():
     """Loads data, trains the model, and prints the evaluation result as JSON."""
     # 1. Prepare Data
     # Adjusted unpacking to match the potentially changed return of prepare_data
-    data_tuple, vocab = prepare_data()
+    data_tuple, vocab, int_to_char = prepare_data() # Expecting 3 values now
 
     if data_tuple is None:
         print("Data preparation failed. Skipping training.")
