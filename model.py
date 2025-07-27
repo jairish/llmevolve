@@ -27,11 +27,11 @@ def create_model():
     decoder_lstm1 = LSTM(LSTM_UNITS, return_sequences=True, return_state=True)
     decoder_outputs1, _, _ = decoder_lstm1(decoder_embedding, initial_state=encoder_states)
     decoder_outputs1 = Dropout(0.3)(decoder_outputs1)
-    decoder_lstm2 = LSTM(LSTM_UNITS, return_sequences=True)
-    decoder_outputs = decoder_lstm2(decoder_outputs1)
-    decoder_outputs = Dropout(0.3)(decoder_outputs)
+    decoder_lstm2 = LSTM(LSTM_UNITS, return_sequences=True, return_state=False)  # Removed return_state
+    decoder_outputs2 = decoder_lstm2(decoder_outputs1)
+    decoder_outputs2 = Dropout(0.3)(decoder_outputs2)
     decoder_dense = TimeDistributed(Dense(VOCAB_SIZE, activation='softmax'))
-    output = decoder_dense(decoder_outputs)
+    output = decoder_dense(decoder_outputs2)
 
     model = Model([encoder_inputs, decoder_inputs], output)
 
