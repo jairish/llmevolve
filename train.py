@@ -121,15 +121,13 @@ def prepare_data():
     corpus_path = download_cornell_dialogs()
     if not corpus_path:
         print("Download or extraction failed.")
-        # Return None for all expected outputs if data prep fails
-        return None, None, None, None
+        return None # Return None if download/extraction failed
 
     qa_pairs = load_cornell_dialogs(corpus_path)
 
     if qa_pairs is None or not qa_pairs: # Check if load failed or no pairs found
         print("No conversational pairs loaded from the dataset.")
-        # Return None for all expected outputs if data load fails
-        return None, None, None, None
+        return None # Return None if load failed or no pairs found
 
     print(f"Loaded {len(qa_pairs)} conversational pairs.")
 
@@ -194,16 +192,16 @@ def prepare_data():
 def train_and_evaluate():
     """Loads data, trains the model, and prints the evaluation result as JSON."""
     # 1. Prepare Data
-    # Adjusted unpacking to match the potentially changed return of prepare_data
-    data_tuple, vocab, int_to_char = prepare_data() # Expecting 3 values now
+    prepared_data = prepare_data() # Get the return value first
 
-    if data_tuple is None:
+    if prepared_data is None: # Check if data preparation failed
         print("Data preparation failed. Skipping training.")
         result = {'loss': float('inf'), 'accuracy': 0.0, 'temp_model_path': ''}
         print(json.dumps(result))
         return # Exit if data prep failed
 
-    encoder_input_data, decoder_input_data, decoder_target_data = data_tuple
+    # Unpack only if data preparation was successful
+    (encoder_input_data, decoder_input_data, decoder_target_data), vocab, int_to_char = prepared_data
 
 
     # Split data (simple split for demonstration)
